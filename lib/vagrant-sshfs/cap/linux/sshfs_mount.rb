@@ -164,8 +164,16 @@ module VagrantPlugins
           #          stdin <= r2        pipe2         w2 <= stdout 
           #
           # Wire up things appropriately and start up the processes
-          p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => t1)
-          p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => t2)
+          x = :sym
+          y = :sym
+
+          if Vagrant::Util::Platform.windows?
+            p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => t1, :new_pgroup => true)
+            p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => t2, :new_pgroup => true)
+          else
+            p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => t1, :pgroup => true)
+            p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => t2, :pgroup => true)
+          end
 
           # Check that the mount made it
           mounted = false

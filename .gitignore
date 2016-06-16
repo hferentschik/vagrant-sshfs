@@ -1,0 +1,9 @@
+# Build artifacts
+pkg
+
+# Ruby / Bundler
+Gemfile.lock
+
+# IDE config files
+.idea
+*.iml
