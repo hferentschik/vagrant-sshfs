@@ -2,18 +2,10 @@ require "log4r"
 require "vagrant/util/retryable"
 require "tempfile"
 
-# This is already done for us in lib/vagrant-sshfs.rb. We needed to
-# do it there before Process.uid is called the first time by Vagrant
-# This provides a new Process.create() that works on Windows.
-if Vagrant::Util::Platform.windows?
-  require 'win32/process'
-end
-
 module VagrantPlugins
   module GuestLinux
     module Cap
       class MountSSHFS
-        extend Vagrant::Util::Retryable
         @@logger = Log4r::Logger.new("vagrant::synced_folders::sshfs_mount")
 
         def self.sshfs_forward_is_folder_mounted(machine, opts)
@@ -144,74 +136,40 @@ module VagrantPlugins
           machine.ui.info(I18n.t("vagrant.sshfs.actions.slave_mounting_folder", 
                           hostpath: hostpath, guestpath: expanded_guest_path))
 
-          # Create two named pipes for communication between sftp-server and
-          # sshfs running in slave mode
-          r1, w1 = IO.pipe # reader/writer from pipe1
-          r2, w2 = IO.pipe # reader/writer from pipe2
-
-          # Log STDERR to predictable files so that we can inspect them
-          # later in case things go wrong. We'll use the machines data
-          # directory (i.e. .vagrant/machines/default/virtualbox/) for this
-          f1path = machine.data_dir.join('vagrant_sshfs_sftp_server_stderr.txt')
-          f2path = machine.data_dir.join('vagrant_sshfs_ssh_stderr.txt')
-          f1 = File.new(f1path, 'w+')
-          f2 = File.new(f2path, 'w+')
-
-          # The way this works is by hooking up the stdin+stdout of the
-          # sftp-server process to the stdin+stdout of the sshfs process
-          # running inside the guest in slave mode. An illustration is below:
-          # 
-          #          stdout => w1      pipe1         r1 => stdin 
-          #         />------------->==============>----------->\
-          #        /                                            \
-          #        |                                            |
-          #    sftp-server (on vm host)                      sshfs (inside guest)
-          #        |                                            |
-          #        \                                            /
-          #         \<-------------<==============<-----------</
-          #          stdin <= r2        pipe2         w2 <= stdout 
-          #
-          # Wire up things appropriately and start up the processes
+          f = Pathname(__dir__).join('do_mount.rb')
           if Vagrant::Util::Platform.windows?
-            # Need to handle Windows differently. Kernel.spawn fails to work, if the shell creating the process is closed.
-            # See https://github.com/dustymabe/vagrant-sshfs/issues/31
-            Process.create(:command_line => sftp_server_cmd,
+            Process.create(:command_line => "ruby #{f} #{sftp_server_cmd} #{ssh_cmd} #{machine.data_dir} true",
                            :creation_flags => Process::DETACHED_PROCESS,
                            :process_inherit => false,
-                           :thread_inherit => true,
-                           :startup_info => {:stdin => w2, :stdout => r1, :stderr => f1})
-
-            Process.create(:command_line => ssh_cmd,
-                           :creation_flags => Process::DETACHED_PROCESS,
-                           :process_inherit => false,
-                           :thread_inherit => true,
-                           :startup_info => {:stdin => w1, :stdout => r2, :stderr => f2})
+                           :thread_inherit => true)
           else
-            p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => f1, :pgroup => true)
-            p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => f2, :pgroup => true)
+            p1 = spawn('ruby', f.to_s, sftp_server_cmd, ssh_cmd, machine.data_dir.to_s, 'false', :pgroup => true)
 
             # Detach from the processes so they will keep running
             Process.detach(p1)
-            Process.detach(p2)
           end
 
           # Check that the mount made it
           mounted = false
-          for i in 0..6
-            machine.ui.info("Checking Mount..")
+          (0..6).each do
+            machine.ui.info('Checking Mount..')
             if self.sshfs_forward_is_folder_mounted(machine, opts)
               mounted = true
               break
             end
             sleep(2)
           end
-          if !mounted
-            f1.rewind # Seek to beginning of the file
-            f2.rewind # Seek to beginning of the file
-            error_class = VagrantPlugins::SyncedFolderSSHFS::Errors::SSHFSSlaveMountFailed
-            raise error_class, sftp_stderr: f1.read, ssh_stderr: f2.read
+          if mounted
+            machine.ui.info('Folder Successfully Mounted!')
+            # f1.rewind # Seek to beginning of the file
+            # f2.rewind # Seek to beginning of the file
+            # error_class = VagrantPlugins::SyncedFolderSSHFS::Errors::SSHFSSlaveMountFailed
+            # raise error_class, sftp_stderr: f1.read, ssh_stderr: f2.read
+          else
+            machine.ui.info('Folder mount failed!')
           end
-          machine.ui.info("Folder Successfully Mounted!")
+
+
         end
 
         # Do a normal sshfs mount in which we will ssh into the guest
@@ -244,7 +202,7 @@ module VagrantPlugins
           machine.ui.info(I18n.t("vagrant.sshfs.actions.normal_mounting_folder", 
                           user: username, host: host, 
                           hostpath: hostpath, guestpath: expanded_guest_path))
-          
+
           # Build up the command and connect
           error_class = VagrantPlugins::SyncedFolderSSHFS::Errors::SSHFSNormalMountFailed
           cmd = echopipe 
@@ -252,7 +210,7 @@ module VagrantPlugins
           cmd+= ssh_opts + ' ' + ssh_opts_append + ' '
           cmd+= sshfs_opts + ' ' + sshfs_opts_append + ' '
           cmd+= "#{username}@#{host}:'#{hostpath}' #{expanded_guest_path}"
-          retryable(on: error_class, tries: 3, sleep: 3) do
+          Vagrant::Util::Retryable.retryable(on: error_class, tries: 3, sleep: 3) do
             machine.communicate.sudo(
               cmd, error_class: error_class, error_key: :normal_mount_failed)
           end
@@ -261,3 +219,4 @@ module VagrantPlugins
     end
   end
 end
+
