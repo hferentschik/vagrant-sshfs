@@ -138,7 +138,7 @@ module VagrantPlugins
 
           f = Pathname(__dir__).join('do_mount.rb')
           if Vagrant::Util::Platform.windows?
-            Process.create(:command_line => "ruby #{f} #{sftp_server_cmd} #{ssh_cmd} #{machine.data_dir} true",
+            Process.create(:command_line => "rubyw #{f} '#{sftp_server_cmd}' '#{ssh_cmd}' #{machine.data_dir} true",
                            :creation_flags => Process::DETACHED_PROCESS,
                            :process_inherit => false,
                            :thread_inherit => true)

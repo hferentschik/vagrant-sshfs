@@ -1,4 +1,8 @@
+$:.unshift 'C:/Users/hardy/.vagrant.d/gems/gems/ffi-1.9.14-x86-mingw32/lib'
+$:.unshift 'C:/Users/hardy/.vagrant.d/gems/gems/win32-process-0.8.3/lib'
+
 require 'pathname'
+require 'win32-process'
 
 module VagrantPlugins
   module GuestLinux
@@ -36,8 +40,17 @@ module VagrantPlugins
           #
           # Wire up things appropriately and start up the processes
           if 'true'.eql? is_windows
-            p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => f1, :new_pgroup => true)
-            p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => f2, :new_pgroup => true)
+            Process.create(:command_line => sftp_server_cmd,
+                           :creation_flags => Process::DETACHED_PROCESS,
+                           :process_inherit => false,
+                           :thread_inherit => true,
+                           :startup_info => {:stdin => w2, :stdout => r1, :stderr => f1})
+
+            Process.create(:command_line => ssh_cmd,
+                           :creation_flags => Process::DETACHED_PROCESS,
+                           :process_inherit => false,
+                           :thread_inherit => true,
+                           :startup_info => {:stdin => w1, :stdout => r2, :stderr => f2})
           else
             p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => f1, :pgroup => true)
             p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => f2, :pgroup => true)

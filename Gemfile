@@ -11,4 +11,6 @@ end
 
 group :plugins do
   gem "vagrant-sshfs" , path: "."
+  gem "vagrant-registration"
+  gem "vagrant-service-manager"
 end
