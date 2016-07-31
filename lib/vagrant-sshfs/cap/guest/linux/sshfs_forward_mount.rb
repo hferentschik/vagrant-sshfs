@@ -136,16 +136,21 @@ module VagrantPlugins
           machine.ui.info(I18n.t("vagrant.sshfs.actions.slave_mounting_folder", 
                           hostpath: hostpath, guestpath: expanded_guest_path))
 
+          # We are going to spawn twice. This is required mainly for Windows were
+          # processes executing the Vagrant command and echoing its IO, cannot
+          # exit even though the main Ruby process exits.
+          # We are going to spawn a independent Ruby process first in which we then
+          # set up the IO pipes for sshfs.
+          # "von hinten durch die Brust ins Auge"
+          ensure_ruby_on_path
           f = Pathname(__dir__).join('do_mount.rb')
           if Vagrant::Util::Platform.windows?
-            Process.create(:command_line => "rubyw #{f} '#{sftp_server_cmd}' '#{ssh_cmd}' #{machine.data_dir} true",
+            Process.create(:command_line => "ruby #{f} '#{machine.env.gems_dir}' '#{sftp_server_cmd}' '#{ssh_cmd}' #{machine.data_dir} true",
                            :creation_flags => Process::DETACHED_PROCESS,
                            :process_inherit => false,
                            :thread_inherit => true)
           else
             p1 = spawn('ruby', f.to_s, sftp_server_cmd, ssh_cmd, machine.data_dir.to_s, 'false', :pgroup => true)
-
-            # Detach from the processes so they will keep running
             Process.detach(p1)
           end
 
@@ -161,15 +166,10 @@ module VagrantPlugins
           end
           if mounted
             machine.ui.info('Folder Successfully Mounted!')
-            # f1.rewind # Seek to beginning of the file
-            # f2.rewind # Seek to beginning of the file
-            # error_class = VagrantPlugins::SyncedFolderSSHFS::Errors::SSHFSSlaveMountFailed
-            # raise error_class, sftp_stderr: f1.read, ssh_stderr: f2.read
           else
             machine.ui.info('Folder mount failed!')
+            # TODO read and echo potential error from file or just print error file location!?
           end
-
-
         end
 
         # Do a normal sshfs mount in which we will ssh into the guest
@@ -214,6 +214,16 @@ module VagrantPlugins
             machine.communicate.sudo(
               cmd, error_class: error_class, error_key: :normal_mount_failed)
           end
+        end
+
+        # On a machine with just Vagrant installed there might be no other Ruby except the
+        # one bundled with Vagrant. Let's make sure the embedded bin directory containing
+        # the Ruby executable is added to the PATH.
+        def self.ensure_ruby_on_path
+          vagrant_binary = Vagrant::Util::Which.which('vagrant')
+          vagrant_binary = File.realpath(vagrant_binary) if File.symlink?(vagrant_binary)
+          embedded_bin_dir = File.join(File.dirname(File.dirname(vagrant_binary)), 'embedded', 'bin')
+          ENV['PATH'] += File::PATH_SEPARATOR + embedded_bin_dir if File.exists?(embedded_bin_dir)
         end
       end
     end

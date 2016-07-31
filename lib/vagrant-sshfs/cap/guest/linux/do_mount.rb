@@ -1,5 +1,9 @@
-$:.unshift 'C:/Users/hardy/.vagrant.d/gems/gems/ffi-1.9.14-x86-mingw32/lib'
-$:.unshift 'C:/Users/hardy/.vagrant.d/gems/gems/win32-process-0.8.3/lib'
+# This file gets execute outside the Vagrant (bundled) environment.
+# For that reason we have to put the gems we need ourself onto the LOADPATH.
+# The caller of this file will pass the Vagrant gem dir as first argument which
+# we use as base to find the required gems
+Dir.entries(ARGV[0]).select { |f| f =~ /^ffi.*$/ || f =~ /^win32-process.*$/ }
+    .each { |gem_dir| $:.unshift "#{File.join(ARGV[0], gem_dir)}/lib" }
 
 require 'pathname'
 require 'win32-process'
@@ -53,8 +57,9 @@ module VagrantPlugins
                            :startup_info => {:stdin => w1, :stdout => r2, :stderr => f2})
           else
             p1 = spawn(sftp_server_cmd, :out => w2, :in => r1, :err => f1, :pgroup => true)
-            p2 = spawn(ssh_cmd,         :out => w1, :in => r2, :err => f2, :pgroup => true)
+            p2 = spawn(ssh_cmd, :out => w1, :in => r2, :err => f2, :pgroup => true)
           end
+
           # Detach from the processes so they will keep running
           Process.detach(p1)
           Process.detach(p2)
@@ -65,5 +70,5 @@ module VagrantPlugins
 end
 
 if __FILE__ == $0
-  VagrantPlugins::GuestLinux::Cap::DoMount.mount(ARGV[0], ARGV[1], ARGV[2], ARGV[3])
+  VagrantPlugins::GuestLinux::Cap::DoMount.mount(ARGV[1], ARGV[2], ARGV[3], ARGV[4])
 end
